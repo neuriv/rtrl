@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.DS_Store
+# Keep research writing, traces, checkpoints and credentials out of commits.
+*.md
+*.json
+*.jsonl
+*.csv
+*.parquet
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.pdf
+*.ipynb
+.env*
+data/
+runs/
+outputs/
+checkpoints/
+docs/
+notes/
