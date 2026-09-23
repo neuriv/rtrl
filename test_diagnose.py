@@ -56,7 +56,8 @@ def test_equal_prompt_weights_and_no_admission_are_explicit():
 
 @pytest.mark.parametrize("change,match", [("censored", "complete"), ("overlap", "disjoint"),
                                          ("retry", "attempt"), ("backend", "backend"),
-                                         ("sampling", "sampling"), ("reward_source_sha256", "reward_source_sha256")])
+                                         ("sampling", "sampling"), ("reward_source_sha256", "reward_source_sha256"),
+                                         ("raw_prompt", "raw_prompt"), ("accept_length", "accept_length")])
 def test_invalid_design_is_rejected(change, match):
     manifest, groups = bank("main", [[0, 1]], [1])
     cal_manifest, cal_groups = copy.deepcopy(calibration())
@@ -66,6 +67,8 @@ def test_invalid_design_is_rejected(change, match):
         cal_groups[0]["prompt_id"] = "main"
     elif change == "retry":
         groups[0]["attempt"] = 1
+    elif change in ("raw_prompt", "accept_length"):
+        manifest[change] = True
     else:
         cal_manifest[change] = "different"
     with pytest.raises(ValueError, match=match):

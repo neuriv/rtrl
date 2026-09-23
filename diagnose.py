@@ -17,6 +17,9 @@ def diagnose(manifest, groups, calibration_manifest, calibration_groups, *, perm
     for field in ("model", "revision", "sampling", "group_size", "dtype", "reward", "reward_source_sha256"):
         if manifest[field] != calibration_manifest[field]:
             raise ValueError(f"Calibration changed {field}")
+    for field in ("raw_prompt", "accept_length"):
+        if manifest.get(field, False) != calibration_manifest.get(field, False):
+            raise ValueError(f"Calibration changed {field}")
     for bank in (groups, calibration_groups):
         if any(g["attempt"] != 0 for g in bank):
             raise ValueError("Only unconditional attempt0 groups belong in this diagnostic")

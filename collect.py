@@ -1,15 +1,11 @@
 """Complete frozen-policy groups on one CUDA GPU. No administrative cancellation."""
 
 import asyncio
-import hashlib
-import importlib
-import inspect
-import math
-import random
 import time
 from importlib.metadata import version
 
-from records import external_output, read_prompts, read_run, write_record
+from records import external_output, read_prompts, write_record
+from rollout import PROTOCOL_SHA256, check_extension, load_reward, prepare_bank, score_sample, tokenize_prompts
 
 
 def cuda_device():
@@ -73,13 +69,7 @@ async def collect_group(backend, row, prompt_ids, trial, attempt, index, args, r
                   "generation_s": 0.0, "finish_reason": None, "reward": None, "seed": seed}
         try:
             result.update(await backend.generate(prompt_ids, seed, f"{gid}-{slot}", started))
-            if result["finish_reason"] == "length" and not args.accept_length:
-                result["status"] = "truncated"
-            else:
-                value = float(await asyncio.to_thread(reward, row, result["text"]))
-                if not math.isfinite(value):
-                    raise ValueError("Verifier returned a nonfinite reward")
-                result.update(reward=value, status="complete")
+            await asyncio.to_thread(score_sample, result, row, reward, args.accept_length)
         except Exception as error:
             result.update(status="error", reward=None, error=f"{type(error).__name__}: {error}")
             if not result["generation_s"]:
@@ -98,52 +88,29 @@ async def run(args):
     if args.seed < 0 or not 0 < args.gpu_memory < 1 or args.max_tokens >= args.max_model_len:
         raise ValueError("Invalid seed, GPU memory fraction, or context/token limit")
     rows, input_hash = read_prompts(args.prompts)
-    previous, old_groups = read_run(args.extend) if args.extend else (None, [])
-    attempt_offset = previous["attempts"] if previous else 0
-    module, function = args.reward.split(":")
-    reward = getattr(importlib.import_module(module), function)
-    source_file = inspect.getsourcefile(reward)
-    if not source_file:
-        raise ValueError("Verifier must have a Python source file for provenance")
-    from pathlib import Path
-    reward_source = Path(source_file).read_bytes()
+    reward, reward_hash = load_reward(args.reward)
     gpu = cuda_device()
     from huggingface_hub import HfApi
     from transformers import AutoTokenizer
     revision = HfApi().model_info(args.model, revision=args.revision).sha
     tokenizer = AutoTokenizer.from_pretrained(args.model, revision=revision)
-    tokenized = {}
-    for row in rows:
-        tokenized[row["id"]] = (tokenizer.encode(row["prompt"], add_special_tokens=True) if args.raw_prompt else
-            tokenizer.apply_chat_template([{"role": "user", "content": row["prompt"]}], tokenize=True, add_generation_prompt=True, return_dict=False))
-        if not tokenized[row["id"]] or len(tokenized[row["id"]]) + args.max_tokens > args.max_model_len:
-            raise ValueError(f"Prompt {row['id']} exceeds the explicit context budget; no silent truncation")
-    for group in old_groups:
-        if tokenized[group["prompt_id"]] != group["prompt_token_ids"]:
-            raise ValueError("Extension changed the original prompt tokens")
-    jobs = [(row, trial, attempt) for row in rows for trial in range(args.trials)
-            for attempt in range(attempt_offset, attempt_offset + args.attempts)]
-    # Randomize physical dispatch order; logical retry order is recorded independently.
-    random.Random(args.seed).shuffle(jobs)
+    tokenized = tokenize_prompts(tokenizer, rows, args.max_tokens, args.max_model_len, args.raw_prompt)
+    previous, old_groups, jobs = prepare_bank(args, rows, tokenized)
     if args.seed + (len(old_groups) + len(jobs)) * args.group_size >= 2**31:
         raise ValueError("Request seeds would exceed the supported range")
     manifest = {"type": "manifest", "schema": 1, "model": args.model, "revision": revision,
                 "dtype": "bfloat16", "gpu": gpu, "seed": args.seed,
-                "group_size": args.group_size, "trials": args.trials, "attempts": attempt_offset + args.attempts,
+                "group_size": args.group_size, "trials": args.trials, "attempts": (previous["attempts"] if previous else 0) + args.attempts,
                 "expected_groups": len(old_groups) + len(jobs), "prompt_ids": [r["id"] for r in rows],
                 "prompts_sha256": input_hash, "reward": args.reward,
-                "reward_source_sha256": hashlib.sha256(reward_source).hexdigest(),
+                "reward_source_sha256": reward_hash, "protocol_source_sha256": PROTOCOL_SHA256,
+                "backend": "vllm", "seed_scope": "Independent RNG seed per response",
                 "sampling": {"temperature": 1.0, "top_p": 1.0, "top_k": -1, "max_tokens": args.max_tokens},
                 "max_model_len": args.max_model_len, "concurrent_groups": args.concurrent_groups,
                 "gpu_memory": args.gpu_memory, "prefix_caching": False, "raw_prompt": args.raw_prompt,
                 "accept_length": args.accept_length, "timing": "Monotonic observation since group dispatch; ready_s includes verifier latency",
                 "versions": {p: version(p) for p in ("torch", "vllm", "transformers")}}
-    if previous:
-        mutable = {"attempts", "expected_groups", "trace_sha256", "extended_from"}
-        changed = [key for key in manifest if key not in mutable and manifest[key] != previous[key]]
-        if changed:
-            raise ValueError(f"Extension must preserve the collection protocol: {', '.join(changed)}")
-        manifest["extended_from"] = previous["trace_sha256"]
+    check_extension(manifest, previous)
     with external_output(args.output) as handle:
         write_record(handle, manifest)
         for group in old_groups:

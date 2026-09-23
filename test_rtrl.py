@@ -3,6 +3,7 @@ import asyncio
 import itertools
 import json
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -495,3 +496,96 @@ def test_integer_reward_requires_terminal_answer():
 def test_terminal_arithmetic_answer(text, expected):
     from rewards import terminal_integer
     assert terminal_integer(text) == expected
+
+
+@pytest.fixture
+def local_backend(monkeypatch):
+    import local
+    model = SimpleNamespace(config=SimpleNamespace(max_position_embeddings=4096))
+    model.to = model.eval = model.requires_grad_ = lambda *a, **k: model
+    tokenizer = SimpleNamespace(encode=lambda *a, **k: [0], apply_chat_template=lambda *a, **k: [0])
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(
+        HfApi=lambda: SimpleNamespace(model_info=lambda *a, **k: SimpleNamespace(sha="fixed"))))
+    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=lambda *a, **k: tokenizer),
+        AutoModelForCausalLM=SimpleNamespace(from_pretrained=lambda *a, **k: model)))
+    monkeypatch.setattr(local, "version", lambda name: "test")
+    calls = []
+
+    def generate(model, tokenizer, prompt, size, seed, max_tokens):
+        calls.append((seed, max_tokens))
+        return [{"token_ids": [1], "logprobs": [-0.5], "text": "answer", "first_token_s": 0.,
+                 "generation_s": 0., "finish_reason": "stop"} for _ in range(size)], time.perf_counter()
+
+    monkeypatch.setattr(local, "generate_group", generate)
+    return local, calls
+
+
+def test_local_extension_preserves_baselines_and_seeds(tmp_path, local_backend):
+    from rtrl import main
+    _, calls = local_backend
+    prompts = tmp_path / "prompts.jsonl"
+    prompts.write_text(json.dumps({"id": "p", "prompt": "test", "reference": "answer"})+"\n")
+    first, extended = tmp_path / "first.jsonl", tmp_path / "extended.jsonl"
+    common = ["local", "--prompts", str(prompts), "--model", "test", "--reward", "rewards:exact_match",
+              "--group-size", "2", "--trials", "2", "--max-tokens", "16"]
+    main(common + ["--attempts", "1", "--output", str(first)])
+    original, old_groups = read_run(first)
+    main(common + ["--attempts", "2", "--extend", str(first), "--output", str(extended)])
+    manifest, groups = read_run(extended)
+    assert groups[:2] == old_groups
+    assert manifest["attempts"] == 3 and len(groups) == 6
+    assert manifest["extended_from"] == original["trace_sha256"]
+    assert read_run(first)[0]["trace_sha256"] == original["trace_sha256"]
+    assert len({g["seed"] for g in groups}) == 6
+    assert [seed for seed, limit in calls if limit == 16] == [g["seed"] for g in groups]
+    assert [d["baseline_id"] for d in replay(groups)["decisions"]] == [d["baseline_id"] for d in replay(old_groups)["decisions"]]
+    for change in (["--seed", "18"], ["--raw-prompt"], ["--accept-length"]):
+        invalid = tmp_path / "invalid.jsonl"
+        with pytest.raises(SystemExit) as error:
+            main(common + change + ["--extend", str(first), "--output", str(invalid)])
+        assert error.value.code == 1 and not invalid.exists()
+
+
+def test_local_verifier_failure_keeps_trace_complete(tmp_path, local_backend):
+    from rtrl import main
+    prompts, output = tmp_path / "prompts.jsonl", tmp_path / "trace.jsonl"
+    prompts.write_text(json.dumps({"id": "p", "prompt": "test"})+"\n")  # Missing verifier reference.
+    main(["local", "--prompts", str(prompts), "--model", "test", "--reward", "rewards:exact_match",
+          "--trials", "1", "--output", str(output)])
+    _, groups = read_run(output)
+    assert all(s["status"] == "error" and s["reward"] is None for s in groups[0]["samples"])
+    assert "KeyError" in groups[0]["samples"][0]["error"]
+
+
+def test_shared_scoring_preserves_unobserved_and_nonfinite_rewards():
+    from rollout import score_sample
+    calls = []
+    reward = lambda row, text: calls.append(text) or float("nan")
+    sample = {"finish_reason": "length", "text": "partial"}
+    score_sample(sample, {}, reward)
+    assert not calls and sample["status"] == "truncated" and sample["reward"] is None
+    score_sample(sample, {}, reward, accept_length=True)
+    assert calls == ["partial"] and sample["status"] == "error" and sample["reward"] is None
+
+
+@pytest.mark.parametrize("command", ["audit", "diagnose"])
+def test_failed_report_does_not_leave_empty_output(tmp_path, monkeypatch, command):
+    import rtrl
+    import grpo
+    import diagnose
+    monkeypatch.setattr(rtrl, "read_run", lambda _: ({}, []))
+
+    def fail(*args):
+        raise ValueError("Invalid experiment")
+
+    monkeypatch.setattr(grpo, "run", fail)
+    monkeypatch.setattr(diagnose, "diagnose", fail)
+    output = tmp_path / "report.json"
+    args = [command, "--trace", "ignored", "--output", str(output)]
+    if command == "diagnose":
+        args += ["--calibration", "ignored"]
+    with pytest.raises(SystemExit) as error:
+        rtrl.main(args)
+    assert error.value.code == 1 and not output.exists()

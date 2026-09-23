@@ -10,32 +10,27 @@ from replay import replay
 def parser():
     p = argparse.ArgumentParser(description="Frozen-policy GRPO selection audit. CUDA collection, explicit local MPS pilots, CPU replay.")
     sub = p.add_subparsers(dest="command", required=True)
-    c = sub.add_parser("collect", help="Record complete independent groups; never enforce the research deadline")
-    c.add_argument("--prompts", required=True, help='External JSONL: {"id": "unique", "prompt": "text", "reference": ...}; extra fields reach the verifier')
-    c.add_argument("--model", required=True, help="Hugging Face model ID; resolved to an immutable revision before generation")
-    c.add_argument("--revision", default="main")
-    c.add_argument("--extend", help="Keep a completed trace's original groups and add --attempts fresh retries per trial into a new file; all other collection settings must match")
-    c.add_argument("--reward", required=True, help="module:function; synchronous (prompt_row, generated_text) -> finite reward. Example: rewards:exact_match")
-    c.add_argument("--group-size", type=int, default=8)
-    c.add_argument("--attempts", type=int, default=4, help="Independent complete groups available per prompt/trial for fresh retry")
-    c.add_argument("--trials", type=int, default=1)
+    for name, size, trials, attempts, help_text in (
+        ("collect", 8, 1, 4, "Record complete independent groups; never enforce the research deadline"),
+        ("local", 4, 8, 1, "Small frozen-model MPS feasibility bank; batched siblings, no production speed claims"),
+    ):
+        s = sub.add_parser(name, help=help_text)
+        s.add_argument("--prompts", required=True, help='External JSONL: {"id": "unique", "prompt": "text", "reference": ...}; extra fields reach the verifier')
+        s.add_argument("--model", required=True, help="Hugging Face model ID; resolved to an immutable revision before generation")
+        s.add_argument("--revision", default="main")
+        s.add_argument("--extend", help="Keep a completed trace's original groups and add --attempts fresh retries per trial into a new file; all other collection settings must match")
+        s.add_argument("--reward", required=True, help="module:function; synchronous (prompt_row, generated_text) -> finite reward. Example: rewards:exact_match")
+        s.add_argument("--group-size", type=int, default=size)
+        s.add_argument("--attempts", type=int, default=attempts, help="Independent complete groups available per prompt/trial for fresh retry")
+        s.add_argument("--trials", type=int, default=trials)
+        s.add_argument("--max-tokens", type=int, default=512)
+        s.add_argument("--seed", type=int, default=17)
+        s.add_argument("--raw-prompt", action="store_true", help="Skip chat templating; input already contains the model's prompt format")
+        s.add_argument("--accept-length", action="store_true", help="Explicitly treat the generation token cap as a task terminal state and score it; otherwise mark truncations unobserved")
+    c = sub.choices["collect"]
     c.add_argument("--concurrent-groups", type=int, default=1)
-    c.add_argument("--max-tokens", type=int, default=512)
     c.add_argument("--max-model-len", type=int, default=4096)
     c.add_argument("--gpu-memory", type=float, default=0.8, help="vLLM allocation fraction; lower context/concurrency for smaller A100s")
-    c.add_argument("--seed", type=int, default=17)
-    c.add_argument("--raw-prompt", action="store_true", help="Skip chat templating; input already contains the model's prompt format")
-    c.add_argument("--accept-length", action="store_true", help="Explicitly treat the generation token cap as a task terminal state and score it; otherwise mark truncations unobserved")
-    local = sub.add_parser("local", help="Small frozen-model MPS feasibility bank; batched siblings, no production speed claims")
-    local.add_argument("--prompts", required=True)
-    local.add_argument("--model", required=True)
-    local.add_argument("--revision", default="main")
-    local.add_argument("--reward", required=True)
-    local.add_argument("--group-size", type=int, default=4)
-    local.add_argument("--trials", type=int, default=8)
-    local.add_argument("--attempts", type=int, default=1)
-    local.add_argument("--max-tokens", type=int, default=512)
-    local.add_argument("--seed", type=int, default=17)
     diagnose = sub.add_parser("diagnose", help="Exploratory local admission comparison; deadline fixed by separate calibration")
     diagnose.add_argument("--trace", required=True)
     diagnose.add_argument("--calibration", required=True)
@@ -72,20 +67,20 @@ def main(argv=None):
                 write_record(handle, result)
         else:
             manifest, groups = read_run(args.trace)
+            if args.command == "audit":
+                from grpo import run
+                result = run(manifest, groups, args)
+            elif args.command == "diagnose":
+                from diagnose import diagnose
+                calibration_manifest, calibration_groups = read_run(args.calibration)
+                result = diagnose(manifest, groups, calibration_manifest, calibration_groups)
+                result["calibration_trace_sha256"] = calibration_manifest["trace_sha256"]
+            else:
+                result = replay(groups, args.deadline, args.clock)
+            result["trace"] = str(args.trace)
+            result["prompts_sha256"] = manifest["prompts_sha256"]
+            result["trace_sha256"] = manifest["trace_sha256"]
             with external_output(args.output) as handle:
-                if args.command == "audit":
-                    from grpo import run
-                    result = run(manifest, groups, args)
-                elif args.command == "diagnose":
-                    from diagnose import diagnose
-                    calibration_manifest, calibration_groups = read_run(args.calibration)
-                    result = diagnose(manifest, groups, calibration_manifest, calibration_groups)
-                    result["calibration_trace_sha256"] = calibration_manifest["trace_sha256"]
-                else:
-                    result = replay(groups, args.deadline, args.clock)
-                result["trace"] = str(args.trace)
-                result["prompts_sha256"] = manifest["prompts_sha256"]
-                result["trace_sha256"] = manifest["trace_sha256"]
                 write_record(handle, result)
     except (ValueError, RuntimeError, OSError) as error:
         p.exit(1, f"rtrl: {error}\n")

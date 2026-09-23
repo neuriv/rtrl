@@ -19,7 +19,7 @@ test = ["pytest>=8", "torch>=2.5", "numpy>=2", "transformers==5.17.0"]
 rtrl = "rtrl:main"
 
 [tool.setuptools]
-py-modules = ["rtrl", "collect", "local", "diagnose", "records", "replay", "grpo", "rewards", "probe"]
+py-modules = ["rtrl", "collect", "local", "rollout", "diagnose", "records", "replay", "grpo", "rewards", "probe"]
 
 [tool.pytest.ini_options]
 testpaths = ["test_rtrl.py", "test_diagnose.py"]

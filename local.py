@@ -1,10 +1,6 @@
 """Small MPS feasibility runs. Batched siblings; no production speed claims."""
 
 import hashlib
-import importlib
-import inspect
-import math
-import random
 import time
 from importlib.metadata import version
 from pathlib import Path
@@ -12,6 +8,7 @@ from pathlib import Path
 import torch
 
 from records import external_output, read_prompts, write_record
+from rollout import PROTOCOL_SHA256, check_extension, load_reward, prepare_bank, score_sample, tokenize_prompts
 
 
 def generate_group(model, tokenizer, prompt, size, seed, max_tokens):
@@ -78,48 +75,41 @@ def run(args):
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     rows, digest = read_prompts(args.prompts)
-    module, function = args.reward.split(":")
-    reward = getattr(importlib.import_module(module), function)
+    reward, reward_hash = load_reward(args.reward)
     revision = HfApi().model_info(args.model, revision=args.revision).sha
     tokenizer = AutoTokenizer.from_pretrained(args.model, revision=revision)
-    prompts = {row["id"]: tokenizer.apply_chat_template(
-        [{"role": "user", "content": row["prompt"]}], tokenize=True, add_generation_prompt=True, return_dict=False) for row in rows}
     model = AutoModelForCausalLM.from_pretrained(
         args.model, revision=revision, dtype=torch.float32, attn_implementation="sdpa").to("mps").eval()
     model.requires_grad_(False)
-    if any(len(p)+args.max_tokens > model.config.max_position_embeddings for p in prompts.values()):
-        raise ValueError("Prompt exceeds the model context budget")
-    jobs = [(row, trial, attempt) for row in rows for trial in range(args.trials)
-            for attempt in range(args.attempts)]
-    random.Random(args.seed).shuffle(jobs)
+    prompts = tokenize_prompts(tokenizer, rows, args.max_tokens, model.config.max_position_embeddings, args.raw_prompt)
+    previous, old_groups, jobs = prepare_bank(args, rows, prompts)
     manifest = {"type": "manifest", "schema": 1, "model": args.model, "revision": revision,
                 "backend": "transformers-mps", "dtype": "float32", "seed": args.seed,
-                "group_size": args.group_size, "trials": args.trials, "attempts": args.attempts,
-                "expected_groups": len(jobs), "prompt_ids": [r["id"] for r in rows],
+                "group_size": args.group_size, "trials": args.trials, "attempts": (previous["attempts"] if previous else 0) + args.attempts,
+                "expected_groups": len(old_groups) + len(jobs), "prompt_ids": [r["id"] for r in rows],
                 "prompts_sha256": digest, "reward": args.reward,
-                "reward_source_sha256": hashlib.sha256(Path(inspect.getsourcefile(reward)).read_bytes()).hexdigest(),
+                "reward_source_sha256": reward_hash, "protocol_source_sha256": PROTOCOL_SHA256,
                 "collector_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 "sampling": {"temperature": 1.0, "top_p": 1.0, "top_k": -1, "max_tokens": args.max_tokens},
-                "accept_length": False, "concurrent_groups": 1, "prefix_caching": False,
+                "accept_length": args.accept_length, "raw_prompt": args.raw_prompt,
+                "concurrent_groups": 1, "prefix_caching": False,
                 "timing": "Batched siblings; synchronized EOS observations. ready_s also includes batch return/scoring. MPS timings are not production throughput.",
                 "seed_scope": "One RNG seed per independently generated group; slots share the RNG stream",
                 "versions": {p: version(p) for p in ("torch", "transformers")}}
+    check_extension(manifest, previous)
     with external_output(args.output) as handle:
         write_record(handle, manifest)
+        for group in old_groups:
+            write_record(handle, group)
         generate_group(model, tokenizer, prompts[rows[0]["id"]], args.group_size, args.seed, 2)
-        for index, (row, trial, attempt) in enumerate(jobs):
+        for index, (row, trial, attempt) in enumerate(jobs, start=len(old_groups)):
             samples, started = generate_group(model, tokenizer, prompts[row["id"]], args.group_size,
                                               args.seed+index+1, args.max_tokens)
             for sample in samples:
-                sample.update(status="truncated", reward=None)
-                if sample["finish_reason"] == "stop":
-                    value = float(reward(row, sample["text"]))
-                    if not math.isfinite(value):
-                        raise ValueError("Verifier returned a nonfinite reward")
-                    sample.update(status="complete", reward=value)
+                score_sample(sample, row, reward, args.accept_length)
                 sample["ready_s"] = time.perf_counter()-started
             write_record(handle, {"type": "group", "id": f"group-{index}", "prompt_id": row["id"],
                                    "trial": trial, "attempt": attempt, "seed": args.seed+index+1,
                                    "prompt_token_ids": prompts[row["id"]], "samples": samples})
-            print(f"local: {index+1}/{len(jobs)} groups", flush=True)
-        write_record(handle, {"type": "end", "groups": len(jobs)})
+            print(f"local: {index+1}/{manifest['expected_groups']} groups", flush=True)
+        write_record(handle, {"type": "end", "groups": manifest["expected_groups"]})
