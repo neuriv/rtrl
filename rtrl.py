@@ -31,7 +31,7 @@ def parser():
     c.add_argument("--concurrent-groups", type=int, default=1)
     c.add_argument("--max-model-len", type=int, default=4096)
     c.add_argument("--gpu-memory", type=float, default=0.8, help="vLLM allocation fraction; lower context/concurrency for smaller A100s")
-    diagnose = sub.add_parser("diagnose", help="Exploratory local admission comparison; deadline fixed by separate calibration")
+    diagnose = sub.add_parser("diagnose", help="Frozen-policy admission comparison; deadline fixed by separate calibration")
     diagnose.add_argument("--trace", required=True)
     diagnose.add_argument("--calibration", required=True)
     probe = sub.add_parser("probe", help="CPU exact/synthetic controls for selection, sampling noise and retry coverage")

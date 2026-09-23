@@ -30,6 +30,35 @@ def test_zero_reward_shift_is_exact_null():
     assert result["mixed_reward_group_shift"] == 0
 
 
+@pytest.mark.parametrize("backend", ["transformers-mps", "vllm"])
+def test_matching_collection_backends_are_supported(backend):
+    manifest, groups = bank("main", [[0, 1]], [1])
+    cal_manifest, cal_groups = calibration()
+    manifest["backend"] = cal_manifest["backend"] = backend
+    manifest["concurrent_groups"] = cal_manifest["concurrent_groups"] = 2
+    result = diagnose(manifest, groups, cal_manifest, cal_groups, permutations=2)
+    assert result["groups_admitted"] == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("gpu", "NVIDIA H100"), ("concurrent_groups", 2), ("prefix_caching", False),
+    ("max_model_len", 4096), ("gpu_memory", .8), ("timing", "group dispatch"),
+    ("versions", {"torch": "2.13.0"}), ("protocol_source_sha256", "protocol"),
+    ("collector_source_sha256", "collector"), ("seed_scope", "per response"),
+])
+def test_calibration_preserves_available_collection_configuration(field, value):
+    manifest, groups = bank("main", [[0, 1]], [1])
+    cal_manifest, cal_groups = calibration()
+    manifest[field] = value
+    with pytest.raises(ValueError, match=field):
+        diagnose(manifest, groups, cal_manifest, cal_groups, permutations=2)
+    cal_manifest[field] = "changed"
+    with pytest.raises(ValueError, match=field):
+        diagnose(manifest, groups, cal_manifest, cal_groups, permutations=2)
+    cal_manifest[field] = value
+    assert diagnose(manifest, groups, cal_manifest, cal_groups, permutations=2)["groups_admitted"] == 1
+
+
 def test_known_selection_signal_uses_whole_groups():
     manifest, groups = bank("main", [[0, 0]] * 12 + [[1, 1]] * 12, [1] * 12 + [2] * 12)
     groups[12]["samples"][0]["generation_s"] = 1

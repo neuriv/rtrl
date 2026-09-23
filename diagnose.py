@@ -12,13 +12,17 @@ def diagnose(manifest, groups, calibration_manifest, calibration_groups, *, perm
     """Fix a deadline on separate prompts; compare admitted vs all within each prompt."""
     if not groups or not calibration_groups or permutations < 1:
         raise ValueError("Nonempty main/calibration groups and positive permutations required")
-    if manifest.get("backend") != "transformers-mps" or manifest["backend"] != calibration_manifest.get("backend"):
+    if manifest.get("backend") not in ("transformers-mps", "vllm") or manifest["backend"] != calibration_manifest.get("backend"):
         raise ValueError("An explicit matching backend is required for compatible timing")
     for field in ("model", "revision", "sampling", "group_size", "dtype", "reward", "reward_source_sha256"):
         if manifest[field] != calibration_manifest[field]:
             raise ValueError(f"Calibration changed {field}")
     for field in ("raw_prompt", "accept_length"):
         if manifest.get(field, False) != calibration_manifest.get(field, False):
+            raise ValueError(f"Calibration changed {field}")
+    for field in ("gpu", "concurrent_groups", "prefix_caching", "max_model_len", "gpu_memory",
+                  "timing", "versions", "protocol_source_sha256", "collector_source_sha256", "seed_scope"):
+        if manifest.get(field) != calibration_manifest.get(field):
             raise ValueError(f"Calibration changed {field}")
     for bank in (groups, calibration_groups):
         if any(g["attempt"] != 0 for g in bank):
