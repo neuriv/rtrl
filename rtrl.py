@@ -8,8 +8,10 @@ from replay import replay
 
 
 def parser():
-    p = argparse.ArgumentParser(description="Frozen-policy GRPO selection audit. CUDA collection, explicit local MPS pilots, CPU replay.")
+    p = argparse.ArgumentParser(description="GRPO training and rollout selection audits.")
     sub = p.add_subparsers(dest="command", required=True)
+    from train import parser as train_parser
+    sub.add_parser("train", parents=[train_parser()], add_help=False, help="Single-H100 comparative GRPO training")
     for name, size, trials, attempts, help_text in (
         ("collect", 8, 1, 4, "Record complete independent groups; never enforce the research deadline"),
         ("local", 4, 8, 1, "Small frozen-model MPS feasibility bank; batched siblings, no production speed claims"),
@@ -45,7 +47,9 @@ def parser():
         if name == "audit":
             s.add_argument("--parameters", default="head", help="head (default), all, or exact parameter-name prefix. A head audit is only a parameter-block diagnostic")
             s.add_argument("--device", choices=["cuda", "mps"], default="cuda", help="Explicit MPS audits require an FP32 local trace; no automatic fallback")
-    for s in sub.choices.values():
+    for name, s in sub.choices.items():
+        if name == "train":
+            continue
         s.add_argument("--output", required=True, help="New output path outside the Git repository; never overwritten")
     return p
 
@@ -54,7 +58,10 @@ def main(argv=None):
     p = parser()
     args = p.parse_args(argv)
     try:
-        if args.command == "collect":
+        if args.command == "train":
+            from train import run
+            run(args)
+        elif args.command == "collect":
             from collect import run
             asyncio.run(run(args))
         elif args.command == "local":
