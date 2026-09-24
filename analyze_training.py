@@ -10,7 +10,7 @@ from records import external_output
 
 MATCH_KEYS = ("model", "revision", "train_sha256", "eval_sha256", "group_size",
               "groups_per_update", "max_tokens", "learning_rate", "precision",
-              "objective", "cache", "scheduler", "cap_reward", "sampling")
+              "objective", "cache", "scheduler", "cap_reward", "sampling", "reward")
 
 
 def read_run(directory):

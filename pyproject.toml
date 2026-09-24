@@ -20,7 +20,7 @@ training = ["torch==2.11.0", "transformers==5.17.0", "wandb==0.21.4"]
 rtrl = "rtrl:main"
 
 [tool.setuptools]
-py-modules = ["rtrl", "collect", "local", "rollout", "diagnose", "records", "replay", "grpo", "rewards", "probe", "training_rollout", "train_update", "prepare_task", "train", "analyze_training"]
+py-modules = ["rtrl", "collect", "local", "rollout", "diagnose", "records", "replay", "grpo", "rewards", "probe", "training_rollout", "train_update", "prepare_task", "train", "analyze_training", "eval_cache"]
 
 [tool.pytest.ini_options]
 testpaths = ["."]

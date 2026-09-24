@@ -63,7 +63,7 @@ def prepare(output_dir, eval_size=128, seed=2718, revision="master"):
     output_dir = Path(output_dir).expanduser().resolve()
     manifest = {"dataset": "GSM8K", "repository": f"https://github.com/{REPOSITORY}",
                 "revision": revision, "seed": seed, "eval_size": eval_size,
-                "prompt_suffix": PROMPT_SUFFIX, "reward": "rewards:arithmetic",
+                "prompt_suffix": PROMPT_SUFFIX, "reward": "rewards:gsm8k",
                 "row_indices_zero_based": indices, "sources": {}, "outputs": {}}
     for split, raw in originals.items():
         filename = f"original_{split}.jsonl"

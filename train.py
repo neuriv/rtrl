@@ -5,13 +5,14 @@ import hashlib
 import json
 import platform
 import random
+import signal
 import subprocess
 import time
 from importlib.metadata import version
 from pathlib import Path
 
 from records import external_output, read_prompts, write_record
-from rewards import arithmetic
+from rewards import gsm8k
 
 
 def parser():
@@ -37,6 +38,7 @@ def parser():
     p.add_argument("--project", default="rtrl-timeout-selection")
     p.add_argument("--entity")
     p.add_argument("--wandb-mode", choices=["online", "offline"], default="online")
+    p.add_argument("--initial-eval", help="Reuse and rescore a matching initial evaluation event file")
     p.add_argument("--resume", help="Checkpoint directory; continue into a NEW output directory")
     return p
 
@@ -54,7 +56,7 @@ def sample_seed(seed, occurrence, attempt):
 
 def score(row, sample):
     # Token cap is an explicit terminal failure in every condition and evaluation.
-    return arithmetic(row, sample["text"]) if sample["finish_reason"] == "stop" else 0.0
+    return gsm8k(row, sample["text"]) if sample["finish_reason"] == "stop" else 0.0
 
 
 def evaluate(model, tokenizer, rows, tokenized, args):
@@ -131,6 +133,8 @@ def run(args):
     if "H100" not in gpu:
         raise ValueError("This comparison is configured for one H100")
     previous = json.loads((Path(args.resume) / "state.json").read_text()) if args.resume else None
+    if previous and args.initial_eval:
+        raise ValueError("A resumed checkpoint needs its own evaluation")
     revision = previous["config"]["revision"] if previous else HfApi().model_info(args.model, revision=args.revision).sha
     config = {**vars(args), "revision": revision, "code_commit": commit, "gpu": gpu,
               "train_sha256": train_hash, "eval_sha256": eval_hash,
@@ -140,6 +144,7 @@ def run(args):
               "cache": "within-response KV only; no cross-group reuse",
               "scheduler": "serial groups; batched siblings; cancellation at token boundaries",
               "cap_reward": 0, "sampling": "temperature=1, top_p=1, top_k=0",
+              "reward": "GSM8K numeric answer: final boxed number or final number; capped=0",
               "python": platform.python_version(),
               "versions": {p: version(p) for p in ("torch", "transformers", "wandb")}}
     if previous:
@@ -168,6 +173,9 @@ def run(args):
             handle.write(f"\n| {time.strftime('%Y-%m-%d %H:%M:%S')} | {args.mode}, seed {args.seed}, {commit[:8]}, {args.seconds}s | {run.url} | {message} | Inspect paired evidence before next decision. |\n")
     journal(f"STARTED; W&B {args.wandb_mode}, run ID {run.id}; offline runs require sync before instance termination.")
     started = time.perf_counter()
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt(f"Received signal {signum}")
+    old_handler = signal.signal(signal.SIGTERM, interrupt)
     try:
         torch.manual_seed(args.seed)
         torch.set_float32_matmul_precision("high")
@@ -190,8 +198,12 @@ def run(args):
             optimizer.load_state_dict(torch.load(Path(args.resume) / "optimizer.pt", weights_only=True))
         with external_output(output / "events.jsonl") as events:
             write_record(events, {"type": "manifest", **config, "run_url": run.url})
-            def evaluate_now():
-                result = evaluate(model, tokenizer, heldout, tokenized, args)
+            def evaluate_now(initial=False):
+                if initial and args.initial_eval:
+                    from eval_cache import load_initial_evaluation
+                    result = load_initial_evaluation(args.initial_eval, config, heldout, score)
+                else:
+                    result = evaluate(model, tokenizer, heldout, tokenized, args)
                 state["evaluation_s"] += result["evaluation_s"]
                 write_record(events, {"type": "eval", **state, **result})
                 run.log({"train/seconds": state["training_s"], "train/optimizer_steps": state["optimizer_steps"],
@@ -212,7 +224,7 @@ def run(args):
                 run.summary[f"checkpoint_{label}"] = f"{subprocess.check_output(['hostname'], text=True).strip()}:{path}"
                 return path
 
-            initial_accuracy = evaluate_now()  # Also warms kernels; no standalone smoke run.
+            initial_accuracy = evaluate_now(initial=True)
             initial_elapsed = time.perf_counter() - started
             next_eval = (state["optimizer_steps"] // args.eval_every + 1) * args.eval_every
             group_stats = []
@@ -293,6 +305,8 @@ def run(args):
         journal(f"FAILED: {type(error).__name__}: {error}")
         run.finish(exit_code=1)
         raise
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)
     run.finish()
 
 
