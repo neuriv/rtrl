@@ -194,3 +194,20 @@ def test_resume_rejects_changed_sampling_configuration(harness):
     first = harness.launch("first", "--max-updates", "1")
     with pytest.raises(ValueError, match="Resume configuration differs: max_tokens"):
         harness.launch("changed", "--resume", first["checkpoint"], "--max-tokens", "5")
+
+
+def test_training_disables_cudnn_attention_and_rejects_old_backend_on_resume(harness):
+    original = torch.backends.cuda.cudnn_sdp_enabled()
+    try:
+        torch.backends.cuda.enable_cudnn_sdp(True)
+        first = harness.launch("backend", "--max-updates", "1")
+        path = Path(first["checkpoint"]) / "state.json"
+        saved = json.loads(path.read_text())
+        assert saved["config"]["attention_backend"]["cudnn"] is False
+        assert not torch.backends.cuda.cudnn_sdp_enabled()
+        saved["config"]["attention_backend"]["cudnn"] = True
+        path.write_text(json.dumps(saved))
+        with pytest.raises(ValueError, match="Resume configuration differs: attention_backend"):
+            harness.launch("changed-backend", "--resume", first["checkpoint"])
+    finally:
+        torch.backends.cuda.enable_cudnn_sdp(original)

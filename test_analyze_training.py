@@ -7,7 +7,8 @@ from analyze_training import MATCH_KEYS, compare, freeze_deadline, read_run
 
 def run(mode="baseline", complete=True):
     config = {key: "same" for key in MATCH_KEYS}
-    config.update(mode=mode, seconds=100, seed=17, code_commit="abc")
+    config.update(mode=mode, seconds=100, seed=17, code_commit="abc", attention_backend={
+        "implementation": "sdpa", "cudnn": False, "flash": True, "efficient": True, "math": True})
     curve = [{"optimizer_steps": step, "training_s": seconds, "accuracy": accuracy}
              for step, seconds, accuracy in [(0, 0, .25), (10, 80, .5), (20, 110, .75)]]
     return {"config": config, "groups": [{"attempts": [{"generation_s": t}]} for t in range(1, 15)],
@@ -35,11 +36,23 @@ def test_only_measured_points_with_exact_common_steps():
     assert all(r["at_common_update"]["optimizer_steps"] == 10 for r in pair["runs"])
 
 
-def test_mismatched_data_is_not_compared():
+@pytest.mark.parametrize("key", ["train_sha256", "attention_backend"])
+def test_mismatched_protocol_is_not_compared(key):
     changed = run("deadline")
-    changed["config"]["train_sha256"] = "other"
-    with pytest.raises(ValueError, match="train_sha256"):
+    if key == "attention_backend":
+        changed["config"][key]["cudnn"] = True
+    else:
+        changed["config"][key] = "other"
+    with pytest.raises(ValueError, match=key):
         compare([run(), changed])
+
+
+def test_missing_attention_backend_is_rejected_even_for_single_run():
+    old = run()
+    del old["config"]["attention_backend"]
+    for runs in ([old], [run(), old], [old, run()]):
+        with pytest.raises(ValueError, match="attention_backend"):
+            compare(runs)
 
 
 def test_summary_counts_caps_only_in_accepted_samples(tmp_path):

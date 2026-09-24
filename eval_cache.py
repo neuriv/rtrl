@@ -13,7 +13,7 @@ def load_initial_evaluation(path, config, rows, scorer):
     manifest = next(records, {})
     if manifest.get("type") != "manifest":
         raise ValueError("Initial evaluation source requires a leading manifest")
-    for key in ("model", "revision", "eval_sha256", "max_tokens", "precision", "versions"):
+    for key in ("model", "revision", "eval_sha256", "max_tokens", "precision", "versions", "attention_backend"):
         if key not in config or key not in manifest or config[key] != manifest[key]:
             raise ValueError(f"Initial evaluation configuration differs: {key}")
     evaluation = next((record for record in records if record.get("type") == "eval"), None)

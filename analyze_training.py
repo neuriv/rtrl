@@ -10,7 +10,7 @@ from records import external_output
 
 MATCH_KEYS = ("model", "revision", "train_sha256", "eval_sha256", "group_size",
               "groups_per_update", "max_tokens", "learning_rate", "precision",
-              "objective", "cache", "scheduler", "cap_reward", "sampling", "reward")
+              "objective", "cache", "scheduler", "cap_reward", "sampling", "reward", "attention_backend")
 
 
 def read_run(directory):
@@ -70,8 +70,9 @@ def freeze_deadline(run):
 
 def compare(runs, budget_seconds=None):
     first = runs[0]["config"]
-    for run in runs[1:]:
-        mismatch = [key for key in MATCH_KEYS if run["config"][key] != first[key]]
+    for run in runs:
+        mismatch = [key for key in MATCH_KEYS if key not in first or key not in run["config"]
+                    or run["config"][key] != first[key]]
         if mismatch:
             raise ValueError(f"Incompatible experiment configurations: {', '.join(mismatch)}")
     budget = min(run["config"]["seconds"] for run in runs)

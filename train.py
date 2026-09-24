@@ -132,6 +132,8 @@ def run(args):
     gpu = cuda_device()
     if "H100" not in gpu:
         raise ValueError("This comparison is configured for one H100")
+    # cuDNN SDPA can compile kernels inside a decode step, delaying cancellation.
+    torch.backends.cuda.enable_cudnn_sdp(False)
     previous = json.loads((Path(args.resume) / "state.json").read_text()) if args.resume else None
     if previous and args.initial_eval:
         raise ValueError("A resumed checkpoint needs its own evaluation")
@@ -142,6 +144,11 @@ def run(args):
               "precision": "FP32 parameters/AdamW state; BF16 forward compute",
               "objective": "on-policy sequence-mean GRPO; no KL; one gradient pass",
               "cache": "within-response KV only; no cross-group reuse",
+              "attention_backend": {"implementation": "sdpa",
+                  "cudnn": torch.backends.cuda.cudnn_sdp_enabled(),
+                  "flash": torch.backends.cuda.flash_sdp_enabled(),
+                  "efficient": torch.backends.cuda.mem_efficient_sdp_enabled(),
+                  "math": torch.backends.cuda.math_sdp_enabled()},
               "scheduler": "serial groups; batched siblings; cancellation at token boundaries",
               "cap_reward": 0, "sampling": "temperature=1, top_p=1, top_k=0",
               "reward": "GSM8K numeric answer: final boxed number or final number; capped=0",
@@ -149,8 +156,9 @@ def run(args):
               "versions": {p: version(p) for p in ("torch", "transformers", "wandb")}}
     if previous:
         for key in ("model", "revision", "mode", "deadline", "replacement_rate", "seed", "group_size",
-                    "groups_per_update", "max_tokens", "learning_rate", "train_sha256", "eval_sha256"):
-            if config[key] != previous["config"][key]:
+                    "groups_per_update", "max_tokens", "learning_rate", "train_sha256", "eval_sha256",
+                    "attention_backend", "precision", "objective", "reward", "versions"):
+            if config[key] != previous["config"].get(key):
                 raise ValueError(f"Resume configuration differs: {key}")
     with external_output(output / "config.json") as handle:
         write_record(handle, config)

@@ -10,7 +10,9 @@ from eval_cache import load_initial_evaluation
 @pytest.fixture
 def source(tmp_path):
     config = {"model": "tiny", "revision": "abc", "eval_sha256": "data", "max_tokens": 64,
-              "precision": "FP32/BF16", "versions": {"torch": "1", "transformers": "2"}}
+              "precision": "FP32/BF16", "versions": {"torch": "1", "transformers": "2"},
+              "attention_backend": {"implementation": "sdpa", "cudnn": False,
+                                    "flash": True, "efficient": True, "math": True}}
     rows = [{"id": "a", "reference": "42"}, {"id": "b", "reference": "7"}]
     manifest = {"type": "manifest", **config, "code_commit": "old", "run_url": "https://wandb.test/source"}
     evaluation = {"type": "eval", "optimizer_steps": 0, "training_s": 0, "evaluation_s": 299,
@@ -45,7 +47,7 @@ def test_reuses_text_rescores_rewards_restores_order_and_records_provenance(sour
     assert config == before
 
 
-@pytest.mark.parametrize("key", ["model", "revision", "eval_sha256", "max_tokens", "precision", "versions"])
+@pytest.mark.parametrize("key", ["model", "revision", "eval_sha256", "max_tokens", "precision", "versions", "attention_backend"])
 def test_protocol_mismatch_or_missing_value_is_rejected(source, key):
     config, rows, manifest, evaluation, save, score = source
     manifest[key] = "different"
