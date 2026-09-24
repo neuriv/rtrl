@@ -170,8 +170,8 @@ def run(args):
     run.log_artifact(code)
     def journal(message):
         with log_path.open("a") as handle:
-            handle.write(f"\n| {time.strftime('%Y-%m-%d %H:%M:%S')} | {args.mode}, seed {args.seed}, {commit[:8]}, {args.seconds}s | {run.url} | {message} | Inspect paired evidence before next decision. |\n")
-    journal(f"STARTED; W&B {args.wandb_mode}, run ID {run.id}; offline runs require sync before instance termination.")
+            handle.write(f"\n| {time.strftime('%Y-%m-%d %H:%M:%S')} | {args.mode}, seed {args.seed}, {commit[:8]}, {args.seconds}s | {run.url or output} | {message} | Inspect paired evidence before next decision. |\n")
+    journal(f"STARTED; W&B {args.wandb_mode}, run ID {run.id}; archive records and checkpoints before instance termination.")
     started = time.perf_counter()
     def interrupt(signum, frame):
         raise KeyboardInterrupt(f"Received signal {signum}")
