@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from eval_cache import load_initial_evaluation
+from rtrl.eval_cache import load_initial_evaluation
 
 
 @pytest.fixture

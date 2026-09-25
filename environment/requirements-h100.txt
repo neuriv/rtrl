@@ -1,6 +1,6 @@
 # CPython 3.12 / Linux x86_64 / glibc 2.39 (Ubuntu 24.04).
 # uv==0.12.18; resolved wheels, not yet installed or executed on an H100.
-# uv pip compile pyproject.toml --extra gpu --extra audit --extra test --python-version 3.12 --python-platform x86_64-manylinux_2_39 --only-binary :all: --no-emit-package rtrl --no-header --no-annotate --output-file requirements-h100.txt
+# uv pip compile pyproject.toml --extra gpu --extra audit --extra test --python-version 3.12 --python-platform x86_64-manylinux_2_39 --only-binary :all: --no-emit-package rtrl --no-header --no-annotate --output-file environment/requirements-h100.txt
 agent-detector==2.0.0
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.3

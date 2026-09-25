@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from diagnose import diagnose
+from rtrl.diagnose import diagnose
 
 
 def bank(prompt, rewards, times):

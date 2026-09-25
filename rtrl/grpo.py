@@ -5,7 +5,7 @@ from itertools import groupby
 
 import torch
 
-from replay import advantages, complete, replay
+from .replay import advantages, complete, replay
 
 
 def grpo_loss(logprobs, mask, advantage, old_logprobs=None, clip=0.2):
@@ -116,7 +116,7 @@ def run(manifest, groups, args):
     traversed = [lookup[gid] for d in result["decisions"] for gid in d["attempted_ids"]]
     if not all(complete(g) for g in traversed):
         raise ValueError("Retry history contains failure/truncation censoring; a timeout-only audit requires complete outcomes")
-    from collect import cuda_device
+    from .collect import cuda_device
     from transformers import AutoModelForCausalLM
     device = getattr(args, "device", "cuda")
     if device == "mps":

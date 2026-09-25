@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from export_tensorboard import export, read_events
+from rtrl.export_tensorboard import export, read_events
 
 
 def test_only_unterminated_final_json_may_be_incomplete(tmp_path):

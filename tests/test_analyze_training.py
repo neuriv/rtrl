@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from analyze_training import MATCH_KEYS, compare, freeze_deadline, read_run
+from rtrl.analyze_training import MATCH_KEYS, compare, freeze_deadline, read_run
 
 
 def run(mode="baseline", complete=True):

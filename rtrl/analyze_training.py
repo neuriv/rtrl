@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 from statistics import mean
 
-from records import external_output
+from .records import external_output
 
 MATCH_KEYS = ("model", "revision", "train_sha256", "eval_sha256", "group_size",
               "groups_per_update", "max_tokens", "learning_rate", "precision",

@@ -7,7 +7,9 @@ dist/
 .DS_Store
 # Keep research writing, traces, checkpoints and credentials out of commits.
 *.md
+!/README.md
 *.json
+!/experiments/*.json
 *.jsonl
 *.csv
 *.parquet

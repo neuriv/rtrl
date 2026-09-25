@@ -5,7 +5,7 @@ import io
 import json
 from pathlib import Path
 
-from records import external_output
+from .records import external_output
 
 
 def plot(report, output_dir):

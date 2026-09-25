@@ -1,6 +1,6 @@
 import pytest
 
-from rewards import arithmetic, gsm8k, gsm8k_answer
+from rtrl.rewards import arithmetic, gsm8k, gsm8k_answer
 
 
 @pytest.mark.parametrize("text,reference", [

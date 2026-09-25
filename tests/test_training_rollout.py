@@ -6,7 +6,7 @@ import pytest
 import torch
 from transformers import GPT2Config, GPT2LMHeadModel
 
-import training_rollout as rollout
+from rtrl import training_rollout as rollout
 
 
 class Tokenizer:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rtrl"
 version = "0.1.0"
-description = "Frozen-policy rollout selection and GRPO update audits"
+description = "Single-GPU GRPO training and rollout-selection experiments"
 requires-python = ">=3.11"
 dependencies = []
 
@@ -18,10 +18,10 @@ training = ["torch==2.11.0", "transformers==5.17.0", "wandb==0.21.4"]
 analysis = ["matplotlib==3.11.2", "tensorboard==2.20.0", "setuptools==80.9.0"]
 
 [project.scripts]
-rtrl = "rtrl:main"
+rtrl = "rtrl.cli:main"
 
 [tool.setuptools]
-py-modules = ["rtrl", "collect", "local", "rollout", "diagnose", "records", "replay", "grpo", "rewards", "probe", "training_rollout", "train_update", "prepare_task", "train", "analyze_training", "eval_cache", "plot_training", "export_tensorboard"]
+packages = ["rtrl"]
 
 [tool.pytest.ini_options]
-testpaths = ["."]
+testpaths = ["tests"]

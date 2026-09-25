@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from records import external_output
+from .records import external_output
 
 
 def read_events(directory):

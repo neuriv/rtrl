@@ -11,10 +11,10 @@ import pytest
 import torch
 import transformers
 
-import collect
-import train
-import train_update
-import training_rollout
+from rtrl import collect
+from rtrl import train
+from rtrl import train_update
+from rtrl import training_rollout
 
 
 def test_prompt_epochs_and_attempt_seeds_do_not_depend_on_replacements():
@@ -38,7 +38,7 @@ def test_cap_is_terminal_failure_even_with_correct_text():
 @pytest.fixture
 def harness(tmp_path, monkeypatch):
     clock = SimpleNamespace(now=0.0)
-    calls, runs, evaluations, loaded = [], [], [], []
+    calls, runs, evaluations, loaded, artifacts = [], [], [], [], []
     decisions = []
 
     class Model(torch.nn.Module):
@@ -93,14 +93,27 @@ def harness(tmp_path, monkeypatch):
         def finish(self, exit_code=0):
             self.finished = exit_code
 
+    def artifact(name, **kwargs):
+        files = []
+        artifacts.append({"type": kwargs["type"], "files": files})
+        return SimpleNamespace(add_file=lambda path, **kw: files.append((path, kw.get("name"))))
+
+    def git_output(command, **kwargs):
+        root = Path(train.__file__).resolve().parents[1]
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return str(root) + "\n"
+        if command == ["git", "ls-files"]:
+            assert kwargs["cwd"] == root
+            return "rtrl/train.py\nenvironment/requirements-training.txt\ntests/test_train.py\n"
+        return "" if command[:2] == ["git", "status"] else "a" * 40 + "\n"
+
     monkeypatch.setitem(sys.modules, "wandb", SimpleNamespace(
         init=Run, Table=lambda **kwargs: kwargs, Histogram=lambda x: x,
         plot=SimpleNamespace(scatter=lambda *args: {}),
-        Artifact=lambda *args, **kwargs: SimpleNamespace(add_file=lambda path, **kw: None)))
+        Artifact=artifact))
     monkeypatch.setattr(train, "version", lambda name: "test")
     monkeypatch.setattr(train.time, "perf_counter", lambda: clock.now)
-    monkeypatch.setattr(train.subprocess, "check_output", lambda command, **kwargs:
-                        "" if command[:2] == ["git", "status"] else "a" * 40 + "\n")
+    monkeypatch.setattr(train.subprocess, "check_output", git_output)
     monkeypatch.setattr(collect, "cuda_device", lambda: "NVIDIA H100")
     monkeypatch.setattr("huggingface_hub.HfApi.model_info", lambda *a, **k: SimpleNamespace(sha="b" * 40))
     monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: Tokenizer())
@@ -152,7 +165,7 @@ def harness(tmp_path, monkeypatch):
         return json.loads((output / "summary.json").read_text())
 
     return SimpleNamespace(launch=launch, calls=calls, runs=runs, evaluations=evaluations,
-                           decisions=decisions, loaded=loaded, log=log)
+                           decisions=decisions, loaded=loaded, log=log, artifacts=artifacts)
 
 
 def test_equal_update_budget_and_training_clock_exclude_evaluation(harness):
@@ -166,6 +179,10 @@ def test_equal_update_budget_and_training_clock_exclude_evaluation(harness):
     metrics = [log for log in harness.runs[0].logs if "eval/accuracy" in log]
     assert [(m["train/optimizer_steps"], m["train/seconds"]) for m in metrics] == [(0, 0), (1, 10), (2, 15)]
     assert "FINISHED" in harness.log.read_text()
+    code_files = next(a["files"] for a in harness.artifacts if a["type"] == "code")
+    root = Path(train.__file__).resolve().parents[1]
+    assert code_files == [(str(root / name), name) for name in
+                          ("rtrl/train.py", "environment/requirements-training.txt", "tests/test_train.py")]
 
 
 def test_resume_preserves_post_checkpoint_zero_advantage_batches(harness):

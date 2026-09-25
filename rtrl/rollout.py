@@ -7,7 +7,7 @@ import math
 import random
 from pathlib import Path
 
-from records import read_run
+from .records import read_run
 
 PROTOCOL_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 

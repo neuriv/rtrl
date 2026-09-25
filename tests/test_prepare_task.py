@@ -1,7 +1,7 @@
 import pytest
 
-from prepare_task import final_answer, prepare_rows
-from rewards import arithmetic
+from rtrl.prepare_task import final_answer, prepare_rows
+from rtrl.rewards import arithmetic
 
 
 @pytest.mark.parametrize("answer,expected", [("steps\n#### 1,024", "1024"),

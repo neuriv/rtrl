@@ -9,10 +9,10 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from replay import advantages, replay
-from grpo import grpo_loss, response_logprobs, group_gradient, compare_gradients
-from records import external_output, read_run
-from collect import collect_group
+from rtrl.replay import advantages, replay
+from rtrl.grpo import grpo_loss, response_logprobs, group_gradient, compare_gradients
+from rtrl.records import external_output, read_run
+from rtrl.collect import collect_group
 
 
 def group(prompt="p", attempt=0, times=(1.0, 2.0), rewards=(0.0, 1.0)):
@@ -212,13 +212,18 @@ def test_incomplete_trace_and_no_overwrite(tmp_path):
         external_output(path)
 
 
-def test_repository_output_is_rejected():
+def test_repository_output_is_rejected(tmp_path, monkeypatch):
+    from pathlib import Path
     with pytest.raises(ValueError, match="outside"):
         external_output("accidental-data.jsonl")
+    from rtrl import records
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="outside"):
+        external_output(Path(records.__file__).resolve().parents[1] / "accidental-data.jsonl")
 
 
 def test_cli_replay_roundtrip(tmp_path):
-    from rtrl import main
+    from rtrl.cli import main
     path, output = tmp_path / "trace.jsonl", tmp_path / "report.json"
     write_fixture(path, [group(times=(1, 4)), group(attempt=1)])
     main(["replay", "--trace", str(path), "--deadline", "2", "--output", str(output)])
@@ -236,7 +241,7 @@ def test_trace_cannot_disguise_truncation_as_completion(tmp_path):
 
 
 def test_audit_rejects_non_timeout_censoring_before_loading_model():
-    from grpo import run
+    from rtrl.grpo import run
     late = group(times=(4, 4))
     truncated = group(attempt=1)
     truncated["samples"][0].update(status="truncated", reward=None, finish_reason="length")
@@ -247,7 +252,7 @@ def test_audit_rejects_non_timeout_censoring_before_loading_model():
 
 
 def test_streamed_tokens_and_logprobs_stay_aligned(monkeypatch):
-    from collect import VLLMBackend
+    from rtrl.collect import VLLMBackend
     monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(SamplingParams=lambda **kw: kw))
     monkeypatch.setitem(sys.modules, "vllm.sampling_params", SimpleNamespace(RequestOutputKind=SimpleNamespace(DELTA="delta")))
 
@@ -270,22 +275,22 @@ def test_streamed_tokens_and_logprobs_stay_aligned(monkeypatch):
 
 
 def test_gpu_execution_cannot_fall_back_to_mac(monkeypatch):
-    from collect import cuda_device
+    from rtrl.collect import cuda_device
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     with pytest.raises(RuntimeError, match="never uses MPS or CPU"):
         cuda_device()
 
 
 def test_mps_audit_requires_matching_local_precision():
-    from grpo import run
+    from rtrl.grpo import run
     args = SimpleNamespace(deadline=None, clock="ready_s", device="mps")
     with pytest.raises(ValueError, match="FP32 local trace"):
         run({"dtype": "bfloat16"}, [group()], args)
 
 
 def test_audit_preserves_collected_precision(monkeypatch):
-    import collect
-    from grpo import run
+    from rtrl import collect
+    from rtrl.grpo import run
     monkeypatch.setattr(collect, "cuda_device", lambda: "test CUDA")
 
     def load(*args, **kwargs):
@@ -333,8 +338,8 @@ def test_prompt_identity_must_match_across_trials():
 
 @pytest.mark.parametrize("raw", [True, False])
 def test_collection_extension_preserves_original_bank(tmp_path, monkeypatch, raw):
-    import collect
-    from rtrl import main
+    from rtrl import collect
+    from rtrl.cli import main
 
     class Backend(FakeBackend):
         def __init__(self, args, revision):
@@ -356,7 +361,7 @@ def test_collection_extension_preserves_original_bank(tmp_path, monkeypatch, raw
     prompts = tmp_path / "prompts.jsonl"
     prompts.write_text(json.dumps({"id": "p", "prompt": "test", "reference": "answer"})+"\n")
     first, extended = tmp_path / "first.jsonl", tmp_path / "extended.jsonl"
-    common = ["collect", "--prompts", str(prompts), "--model", "test/model", "--reward", "rewards:exact_match", "--group-size", "2", "--trials", "2"]
+    common = ["collect", "--prompts", str(prompts), "--model", "test/model", "--reward", "rtrl.rewards:exact_match", "--group-size", "2", "--trials", "2"]
     if raw:
         common.append("--raw-prompt")
     main(common + ["--attempts", "1", "--output", str(first)])
@@ -374,7 +379,7 @@ def test_collection_extension_preserves_original_bank(tmp_path, monkeypatch, raw
 
 
 def test_paired_sampling_error_matches_analytic_covariance():
-    from grpo import paired_summary
+    from rtrl.grpo import paired_summary
     zero = [torch.tensor([0., 0.])]
     result = paired_summary(iter([("p", zero, [torch.tensor([2., 0.])]),
                                   ("p", zero, [torch.tensor([0., 2.])])]))
@@ -384,7 +389,7 @@ def test_paired_sampling_error_matches_analytic_covariance():
 
 
 def test_sampling_error_does_not_pool_prompt_difficulty():
-    from grpo import paired_summary
+    from rtrl.grpo import paired_summary
     zero = [torch.zeros(1)]
     pairs = [("a", zero, [torch.tensor([10.])])]*2 + [("b", zero, [torch.tensor([-10.])])]*2
     result = paired_summary(iter(pairs))
@@ -394,7 +399,7 @@ def test_sampling_error_does_not_pool_prompt_difficulty():
 
 
 def test_exact_probe_matches_exhaustive_groups():
-    from probe import exact_binary
+    from rtrl.probe import exact_binary
     p = 0.25
     probabilities = [.375, .375, .05, .2]
     scores = [-p, -p, 1-p, 1-p]
@@ -412,7 +417,7 @@ def test_exact_probe_matches_exhaustive_groups():
 
 
 def test_retry_coverage_matches_exhaustive_attempts():
-    from probe import retry_coverage
+    from rtrl.probe import retry_coverage
     # Each two-response group is admitted with probability 1/4.
     resolved = sum(1 for outcomes in itertools.product([False, True], repeat=6)
                    if any(all(outcomes[i:i+2]) for i in [0, 2, 4]))/64
@@ -421,7 +426,7 @@ def test_retry_coverage_matches_exhaustive_attempts():
 
 def test_streamed_uncertainty_matches_dense_reference():
     import numpy as np
-    from grpo import paired_summary
+    from rtrl.grpo import paired_summary
     rng = np.random.default_rng(42)
     a, b = rng.normal(size=(2, 3, 5, 7)).astype("float32")
     pairs = ((str(p), [torch.from_numpy(a[p,t])], [torch.from_numpy(b[p,t])])
@@ -434,7 +439,7 @@ def test_streamed_uncertainty_matches_dense_reference():
 
 def test_local_batch_records_first_eos_and_aligned_probabilities():
     from types import SimpleNamespace
-    from local import generate_group
+    from rtrl.local import generate_group
 
     class Model(torch.nn.Module):
         def __init__(self):
@@ -460,7 +465,7 @@ def test_local_batch_records_first_eos_and_aligned_probabilities():
 
 def test_local_cap_is_not_an_eos():
     from types import SimpleNamespace
-    from local import generate_group
+    from rtrl.local import generate_group
 
     class Model(torch.nn.Module):
         def __init__(self):
@@ -481,7 +486,7 @@ def test_local_cap_is_not_an_eos():
 
 
 def test_integer_reward_requires_terminal_answer():
-    from rewards import final_integer
+    from rtrl.rewards import final_integer
     assert final_integer({"reference": 42}, "6 * 7 = 42\nFinal: 42\n") == 1
     assert final_integer({"reference": 42}, "Final: 41") == 0
     assert final_integer({"reference": 42}, "Final: 42\nBut maybe 43") == 0
@@ -494,13 +499,13 @@ def test_integer_reward_requires_terminal_answer():
                                           (r"Answer: \frac{1}{42}", None), ("Final: −42", -42),
                                           ("Final: - 42", -42), ("Final: 2^42", None)])
 def test_terminal_arithmetic_answer(text, expected):
-    from rewards import terminal_integer
+    from rtrl.rewards import terminal_integer
     assert terminal_integer(text) == expected
 
 
 @pytest.fixture
 def local_backend(monkeypatch):
-    import local
+    from rtrl import local
     model = SimpleNamespace(config=SimpleNamespace(max_position_embeddings=4096))
     model.to = model.eval = model.requires_grad_ = lambda *a, **k: model
     tokenizer = SimpleNamespace(encode=lambda *a, **k: [0], apply_chat_template=lambda *a, **k: [0])
@@ -523,12 +528,12 @@ def local_backend(monkeypatch):
 
 
 def test_local_extension_preserves_baselines_and_seeds(tmp_path, local_backend):
-    from rtrl import main
+    from rtrl.cli import main
     _, calls = local_backend
     prompts = tmp_path / "prompts.jsonl"
     prompts.write_text(json.dumps({"id": "p", "prompt": "test", "reference": "answer"})+"\n")
     first, extended = tmp_path / "first.jsonl", tmp_path / "extended.jsonl"
-    common = ["local", "--prompts", str(prompts), "--model", "test", "--reward", "rewards:exact_match",
+    common = ["local", "--prompts", str(prompts), "--model", "test", "--reward", "rtrl.rewards:exact_match",
               "--group-size", "2", "--trials", "2", "--max-tokens", "16"]
     main(common + ["--attempts", "1", "--output", str(first)])
     original, old_groups = read_run(first)
@@ -549,10 +554,10 @@ def test_local_extension_preserves_baselines_and_seeds(tmp_path, local_backend):
 
 
 def test_local_verifier_failure_keeps_trace_complete(tmp_path, local_backend):
-    from rtrl import main
+    from rtrl.cli import main
     prompts, output = tmp_path / "prompts.jsonl", tmp_path / "trace.jsonl"
     prompts.write_text(json.dumps({"id": "p", "prompt": "test"})+"\n")  # Missing verifier reference.
-    main(["local", "--prompts", str(prompts), "--model", "test", "--reward", "rewards:exact_match",
+    main(["local", "--prompts", str(prompts), "--model", "test", "--reward", "rtrl.rewards:exact_match",
           "--trials", "1", "--output", str(output)])
     _, groups = read_run(output)
     assert all(s["status"] == "error" and s["reward"] is None for s in groups[0]["samples"])
@@ -560,7 +565,7 @@ def test_local_verifier_failure_keeps_trace_complete(tmp_path, local_backend):
 
 
 def test_shared_scoring_preserves_unobserved_and_nonfinite_rewards():
-    from rollout import score_sample
+    from rtrl.rollout import score_sample
     calls = []
     reward = lambda row, text: calls.append(text) or float("nan")
     sample = {"finish_reason": "length", "text": "partial"}
@@ -572,9 +577,9 @@ def test_shared_scoring_preserves_unobserved_and_nonfinite_rewards():
 
 @pytest.mark.parametrize("command", ["audit", "diagnose"])
 def test_failed_report_does_not_leave_empty_output(tmp_path, monkeypatch, command):
-    import rtrl
-    import grpo
-    import diagnose
+    from rtrl import cli as rtrl
+    from rtrl import grpo
+    from rtrl import diagnose
     monkeypatch.setattr(rtrl, "read_run", lambda _: ({}, []))
 
     def fail(*args):

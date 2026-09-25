@@ -5,8 +5,8 @@ import time
 
 import torch
 
-from grpo import grpo_loss, response_logprobs
-from replay import advantages
+from .grpo import grpo_loss, response_logprobs
+from .replay import advantages
 
 
 def update(model, optimizer, groups, device, *, max_grad_norm=1.0):

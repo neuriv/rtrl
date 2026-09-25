@@ -11,7 +11,7 @@ fi
 [[ "$(uname -s)/$(uname -m)" == Linux/x86_64 ]] || {
     echo 'Run this on the Linux GPU host, not the Mac.' >&2; exit 1;
 }
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export UV_PYTHON_INSTALL_DIR="$PWD/.venv-tools/python"
 if [[ ! -x .venv-tools/uv ]]; then
@@ -25,7 +25,7 @@ fi
 [[ -x .venv-training/bin/python ]] || .venv-tools/uv venv --python 3.12 .venv-training
 python_bin="$PWD/.venv-training/bin/python"
 .venv-tools/uv pip install --python "$python_bin" --only-binary :all: \
-    --index-strategy unsafe-best-match -r requirements-training.txt
+    --index-strategy unsafe-best-match -r environment/requirements-training.txt
 .venv-tools/uv pip install --python "$python_bin" --no-deps --no-build-isolation -e .
 .venv-tools/uv pip check --python "$python_bin"
 "$python_bin" - <<'PY'

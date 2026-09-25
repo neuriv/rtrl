@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from grpo import grpo_loss, response_logprobs
-from replay import advantages
-from train_update import update
+from rtrl.grpo import grpo_loss, response_logprobs
+from rtrl.replay import advantages
+from rtrl.train_update import update
 
 
 class TinyPolicy(torch.nn.Module):

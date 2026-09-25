@@ -7,8 +7,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from records import external_output, read_run, write_record
-from replay import complete
+from .records import external_output, read_run, write_record
+from .replay import complete
 
 
 def main():
@@ -19,26 +19,27 @@ def main():
     if output.exists():
         parser.error("Use a new output directory; existing smoke results are never overwritten")
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-    from collect import cuda_device
+    from .collect import cuda_device
     gpu = cuda_device()
     prompts = output / "prompts.jsonl"
     with external_output(prompts) as handle:
         for pid, question, answer in (("smoke-add", "19 + 23", 42), ("smoke-multiply", "37 * 24", 888)):
             write_record(handle, {"id": pid, "prompt": f"Calculate {question}. Show your work briefly, then write Final: <integer>.",
                                   "reference": answer})
-    root = Path(__file__).resolve().parent
+    root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"],
+                cwd=Path(__file__).resolve().parent, text=True).strip())
     with external_output(output / "environment.txt") as handle:
         handle.write(f"GPU: {gpu}\n")
         for command in (["git", "rev-parse", "HEAD"], ["git", "status", "--porcelain"],
                         ["nvidia-smi"], [sys.executable, "-m", "pip", "freeze"]):
             handle.write(subprocess.check_output(command, cwd=root, text=True) + "\n")
     trace, audit = output / "trace.jsonl", output / "audit.jsonl"
-    cli = [sys.executable, str(root / "rtrl.py")]
+    cli = [sys.executable, "-m", "rtrl"]
     # Separate processes release the inference engine's GPU allocation before scoring.
     subprocess.run(cli + ["collect", "--prompts", str(prompts),
                           "--model", "Qwen/Qwen2.5-0.5B-Instruct",
                           "--revision", "7ae557604adf67be50417f59c2c2f167def9a775",
-                          "--reward", "rewards:arithmetic", "--group-size", "4", "--trials", "2", "--attempts", "1",
+                          "--reward", "rtrl.rewards:arithmetic", "--group-size", "4", "--trials", "2", "--attempts", "1",
                           "--max-tokens", "512", "--max-model-len", "2048", "--gpu-memory", "0.5",
                           "--output", str(trace)], cwd=root, check=True)
     manifest, groups = read_run(trace)

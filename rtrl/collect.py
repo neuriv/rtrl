@@ -4,8 +4,8 @@ import asyncio
 import time
 from importlib.metadata import version
 
-from records import external_output, read_prompts, write_record
-from rollout import PROTOCOL_SHA256, check_extension, load_reward, prepare_bank, score_sample, tokenize_prompts
+from .records import external_output, read_prompts, write_record
+from .rollout import PROTOCOL_SHA256, check_extension, load_reward, prepare_bank, score_sample, tokenize_prompts
 
 
 def cuda_device():

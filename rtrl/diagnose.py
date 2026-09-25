@@ -4,8 +4,8 @@ import math
 import random
 from statistics import fmean
 
-from records import validate_groups
-from replay import complete
+from .records import validate_groups
+from .replay import complete
 
 
 def diagnose(manifest, groups, calibration_manifest, calibration_groups, *, permutations=2000, seed=17):

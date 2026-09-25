@@ -11,8 +11,11 @@ import time
 from importlib.metadata import version
 from pathlib import Path
 
-from records import external_output, read_prompts, write_record
-from rewards import gsm8k
+from .records import external_output, read_prompts, write_record
+from .rewards import gsm8k
+
+ATTENTION_BACKEND = {"implementation": "sdpa", "cudnn": False,
+                     "flash": True, "efficient": True, "math": True}
 
 
 def parser():
@@ -62,7 +65,7 @@ def score(row, sample):
 def evaluate(model, tokenizer, rows, tokenized, args):
     import torch
     from transformers import GenerationConfig
-    from training_rollout import synchronize
+    from .training_rollout import synchronize
     device = next(model.parameters()).device
     eos = model.generation_config.eos_token_id or tokenizer.eos_token_id
     eos_ids = [eos] if isinstance(eos, int) else eos
@@ -101,9 +104,9 @@ def run(args):
     import wandb
     from huggingface_hub import HfApi
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    from collect import cuda_device
-    from train_update import update
-    from training_rollout import retry_group
+    from .collect import cuda_device
+    from .train_update import update
+    from .training_rollout import retry_group
 
     if min(args.seconds, args.max_updates, args.groups_per_update, args.max_tokens,
            args.eval_every, args.eval_batch_size, args.learning_rate) <= 0 or args.group_size < 2:
@@ -118,7 +121,8 @@ def run(args):
         raise ValueError("Only the random condition accepts --replacement-rate")
     log_path = Path(args.experiment_log).expanduser().resolve()
     prior_log = log_path.read_text()  # Required before every launch, including resumes.
-    root = Path(__file__).resolve().parent
+    root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"],
+                cwd=Path(__file__).resolve().parent, text=True).strip())
     if log_path.is_relative_to(root):
         raise ValueError("Experiment log must remain outside Git")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
@@ -133,7 +137,7 @@ def run(args):
     if "H100" not in gpu:
         raise ValueError("This comparison is configured for one H100")
     # cuDNN SDPA can compile kernels inside a decode step, delaying cancellation.
-    torch.backends.cuda.enable_cudnn_sdp(False)
+    torch.backends.cuda.enable_cudnn_sdp(ATTENTION_BACKEND["cudnn"])
     previous = json.loads((Path(args.resume) / "state.json").read_text()) if args.resume else None
     if previous and args.initial_eval:
         raise ValueError("A resumed checkpoint needs its own evaluation")
@@ -208,7 +212,7 @@ def run(args):
             write_record(events, {"type": "manifest", **config, "run_url": run.url})
             def evaluate_now(initial=False):
                 if initial and args.initial_eval:
-                    from eval_cache import load_initial_evaluation
+                    from .eval_cache import load_initial_evaluation
                     result = load_initial_evaluation(args.initial_eval, config, heldout, score)
                 else:
                     result = evaluate(model, tokenizer, heldout, tokenized, args)

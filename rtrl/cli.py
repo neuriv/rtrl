@@ -1,16 +1,16 @@
-"""Flat research harness. Run `rtrl COMMAND --help` for the data contract."""
+"""Run `rtrl COMMAND --help` for the training and frozen-collection contracts."""
 
 import argparse
 import asyncio
 
-from records import external_output, read_run, write_record
-from replay import replay
+from .records import external_output, read_run, write_record
+from .replay import replay
 
 
 def parser():
     p = argparse.ArgumentParser(description="GRPO training and rollout selection audits.")
     sub = p.add_subparsers(dest="command", required=True)
-    from train import parser as train_parser
+    from .train import parser as train_parser
     sub.add_parser("train", parents=[train_parser()], add_help=False, help="Single-H100 comparative GRPO training")
     for name, size, trials, attempts, help_text in (
         ("collect", 8, 1, 4, "Record complete independent groups; never enforce the research deadline"),
@@ -21,7 +21,7 @@ def parser():
         s.add_argument("--model", required=True, help="Hugging Face model ID; resolved to an immutable revision before generation")
         s.add_argument("--revision", default="main")
         s.add_argument("--extend", help="Keep a completed trace's original groups and add --attempts fresh retries per trial into a new file; all other collection settings must match")
-        s.add_argument("--reward", required=True, help="module:function; synchronous (prompt_row, generated_text) -> finite reward. Example: rewards:exact_match")
+        s.add_argument("--reward", required=True, help="module:function; synchronous (prompt_row, generated_text) -> finite reward. Example: rtrl.rewards:exact_match")
         s.add_argument("--group-size", type=int, default=size)
         s.add_argument("--attempts", type=int, default=attempts, help="Independent complete groups available per prompt/trial for fresh retry")
         s.add_argument("--trials", type=int, default=trials)
@@ -59,26 +59,26 @@ def main(argv=None):
     args = p.parse_args(argv)
     try:
         if args.command == "train":
-            from train import run
+            from .train import run
             run(args)
         elif args.command == "collect":
-            from collect import run
+            from .collect import run
             asyncio.run(run(args))
         elif args.command == "local":
-            from local import run
+            from .local import run
             run(args)
         elif args.command == "probe":
-            from probe import run
+            from .probe import run
             result = run(args)
             with external_output(args.output) as handle:
                 write_record(handle, result)
         else:
             manifest, groups = read_run(args.trace)
             if args.command == "audit":
-                from grpo import run
+                from .grpo import run
                 result = run(manifest, groups, args)
             elif args.command == "diagnose":
-                from diagnose import diagnose
+                from .diagnose import diagnose
                 calibration_manifest, calibration_groups = read_run(args.calibration)
                 result = diagnose(manifest, groups, calibration_manifest, calibration_groups)
                 result["calibration_trace_sha256"] = calibration_manifest["trace_sha256"]

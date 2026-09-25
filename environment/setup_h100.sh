@@ -6,14 +6,14 @@ if [[ "${1:-}" == "--help" ]]; then
         'Requires Linux x86_64, glibc >= 2.39, Python 3.12, NVIDIA driver >= 580.' \
         'Current R615+ GPU images recommended for the locked CUDA JIT dependencies.' \
         'Creates .venv-h100; downloads pinned binary packages; runs GPU and unit checks.' \
-        'Then run .venv-h100/bin/python smoke_h100.py --output-dir ../rtrl-runs/smoke-1'
+        'Then run .venv-h100/bin/python -m rtrl.smoke_h100 --output-dir ../rtrl-runs/smoke-1'
     exit 0
 fi
 [[ $# == 0 ]] || { echo 'Use --help for usage.' >&2; exit 1; }
 [[ "$(uname -s)/$(uname -m)" == Linux/x86_64 ]] || {
     echo 'Run this on the Linux GPU host, not the Mac.' >&2; exit 1;
 }
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 python_bin="${RTRL_PYTHON:-python3.12}"
 "$python_bin" - <<'PY'
 import platform
@@ -31,7 +31,7 @@ PY
 "$python_bin" -m venv .venv-h100
 python_bin="$PWD/.venv-h100/bin/python"
 "$python_bin" -m pip install --disable-pip-version-check 'uv==0.12.18'
-.venv-h100/bin/uv pip install --python "$python_bin" --only-binary :all: -r requirements-h100.txt
+.venv-h100/bin/uv pip install --python "$python_bin" --only-binary :all: -r environment/requirements-h100.txt
 .venv-h100/bin/uv pip install --python "$python_bin" --no-deps --no-build-isolation -e .
 .venv-h100/bin/uv pip check --python "$python_bin"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
@@ -42,7 +42,7 @@ import torch
 import vllm._C
 from vllm.v1.engine.async_llm import AsyncLLM
 
-from collect import cuda_device
+from rtrl.collect import cuda_device
 
 gpu = cuda_device()
 x = torch.randn(64, 64, device='cuda', dtype=torch.bfloat16, requires_grad=True)
@@ -55,4 +55,4 @@ print({'gpu': gpu, 'memory_GiB': round(torch.cuda.get_device_properties(0).total
 PY
 "$python_bin" -m pytest -q
 printf '%s\n' 'Environment checks passed. Real-model execution still needs the smoke test:' \
-    '.venv-h100/bin/python smoke_h100.py --output-dir ../rtrl-runs/smoke-1'
+    '.venv-h100/bin/python -m rtrl.smoke_h100 --output-dir ../rtrl-runs/smoke-1'

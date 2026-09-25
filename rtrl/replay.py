@@ -3,7 +3,7 @@
 import math
 from statistics import mean, stdev
 
-from records import validate_groups
+from .records import validate_groups
 
 
 def advantages(rewards):
