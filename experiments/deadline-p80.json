@@ -1,0 +1,20 @@
+{
+  "arguments": {
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+    "mode": "deadline",
+    "seed": 17,
+    "seconds": 1800.0,
+    "max_updates": 100000,
+    "group_size": 4,
+    "groups_per_update": 4,
+    "max_tokens": 512,
+    "learning_rate": 1e-06,
+    "eval_every": 10,
+    "eval_batch_size": 16,
+    "project": "rtrl-timeout-selection",
+    "wandb_mode": "offline",
+    "deadline": 6.477440634999766
+  },
+  "reuse_initial_evaluation": true
+}
